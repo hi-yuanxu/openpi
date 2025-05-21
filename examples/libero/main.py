@@ -13,6 +13,7 @@ from openpi_client import image_tools
 from openpi_client import websocket_client_policy as _websocket_client_policy
 import tqdm
 import tyro
+import time
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data
@@ -24,7 +25,7 @@ class Args:
     # Model server parameters
     #################################################################################################################
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 45789
     resize_size: int = 224
     replan_steps: int = 5
 
@@ -35,7 +36,7 @@ class Args:
         "libero_spatial"  # Task suite. Options: libero_spatial, libero_object, libero_goal, libero_10, libero_90
     )
     num_steps_wait: int = 10  # Number of steps to wait for objects to stabilize i n sim
-    num_trials_per_task: int = 50  # Number of rollouts per task
+    num_trials_per_task: int = 10  # Number of rollouts per task
 
     #################################################################################################################
     # Utils
@@ -46,6 +47,15 @@ class Args:
 
 
 def eval_libero(args: Args) -> None:
+    # logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(),  # 输出到控制台
+            logging.FileHandler(f"data/libero/logs/{args.task_suite_name}.log", mode="w")  # 输出到文件
+        ]
+    )
     # Set random seed
     np.random.seed(args.seed)
 
@@ -87,6 +97,9 @@ def eval_libero(args: Args) -> None:
         # Start episodes
         task_episodes, task_successes = 0, 0
         for episode_idx in tqdm.tqdm(range(args.num_trials_per_task)):
+            # 初始化环境
+            # env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed)
+            
             logging.info(f"\nTask: {task_description}")
 
             # Reset environment
@@ -149,8 +162,10 @@ def eval_libero(args: Args) -> None:
 
                     action = action_plan.popleft()
 
+                    # print(f"Step {t+1}/{max_steps + args.num_steps_wait}  {action}")
                     # Execute action in environment
                     obs, reward, done, info = env.step(action.tolist())
+                    # time.sleep(0.01)  # Sleep for a bit to slow down the simulation
                     if done:
                         task_successes += 1
                         total_successes += 1
@@ -168,10 +183,13 @@ def eval_libero(args: Args) -> None:
             suffix = "success" if done else "failure"
             task_segment = task_description.replace(" ", "_")
             imageio.mimwrite(
-                pathlib.Path(args.video_out_path) / f"rollout_{task_segment}_{suffix}.mp4",
+                pathlib.Path(args.video_out_path) / f"{args.task_suite_name}_rollout_{task_segment}_{suffix}.mp4",
                 [np.asarray(x) for x in replay_images],
                 fps=10,
             )
+            
+            # replay_images.clear()
+            # env.close()  # 释放资源
 
             # Log current results
             logging.info(f"Success: {done}")
